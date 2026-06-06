@@ -1,0 +1,41 @@
+# ── Claude Code session state ────────────────────────────────────────────────
+# Working notes for resuming between sessions — not source code, not for VCS
+.claude/
+
+# ── Clasp / Google Apps Script ──────────────────────────────────────────────
+# Contains scriptId — generated from SCRIPT_ID GitHub Secret in CI/CD
+# For local dev: copy .clasp.json.example → .clasp.json and fill in your ID
+.clasp.json
+
+# Clasp OAuth tokens — NEVER commit, lives in ~/.clasprc.json
+.clasprc.json
+
+# ── Node / npm ────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+*.local
+
+# ── OS junk ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor configs (project-local) ────────────────────────────────────────────
+# .vscode/ is intentionally NOT ignored so shared settings can be committed
+# if you want to exclude it, uncomment:
+# .vscode/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Build / temp ──────────────────────────────────────────────────────────────
+dist/
+build/
+.tmp/
