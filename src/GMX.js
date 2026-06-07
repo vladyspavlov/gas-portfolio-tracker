@@ -167,8 +167,9 @@ const GMX = {
           if (matchIdx >= 0 && arbCache[matchIdx]) acctPrice = arbCache[matchIdx].price;
         }
         const value_usd = acctPrice !== null ? balance * acctPrice : null;
+        const acctApy   = (matchIdx >= 0 && arbCache[matchIdx]) ? arbCache[matchIdx].apy : null;
 
-        positionRows.push([timestamp, 'gmx', 'arbitrum', 'gmx_account', 'GM', 'lp', balance, value_usd, null]);
+        positionRows.push([timestamp, 'gmx', 'arbitrum', 'gmx_account', 'GM', 'lp', balance, value_usd, acctApy]);
         Logger.log('GMX Account: bal=' + balance.toFixed(2) + (value_usd ? ' val=$' + value_usd.toFixed(2) : ''));
       } catch (e) {
         Logger.log('GMX Account balance error: ' + e.message);

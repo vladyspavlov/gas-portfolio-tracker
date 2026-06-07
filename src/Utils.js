@@ -31,6 +31,16 @@ const Utils = {
     }
   },
 
+  // Last row in column A that has actual data — ignores formula-only rows that return ""
+  // Use this instead of sheet.getLastRow() when other columns have ARRAYFORMULA
+  lastDataRow: function(sheet) {
+    var vals = sheet.getRange(1, 1, sheet.getMaxRows(), 1).getValues();
+    for (var i = vals.length - 1; i >= 0; i--) {
+      if (vals[i][0] !== '') return i + 1;
+    }
+    return 0;
+  },
+
   logger: {
     log: function(msg) {
       Logger.log(msg);

@@ -6,7 +6,7 @@ function snapshotPortfolio() {
     return;
   }
 
-  const timestamp  = new Date().toISOString();
+  const timestamp  = new Date();
   const errorFlags = [];
 
   // GMX market/token lists — comma-separated in Config tab
@@ -81,7 +81,7 @@ function snapshotPortfolio() {
   // Positions — batch write: Fluid + Aave + GMX rows
   const positionRows = fluid.positionRows.concat(aave.positionRows).concat(gmx.positionRows);
   if (positionRows.length > 0) {
-    const lastPos = positionsSheet.getLastRow();
+    const lastPos = Utils.lastDataRow(positionsSheet);
     positionsSheet
       .getRange(lastPos + 1, 1, positionRows.length, positionRows[0].length)
       .setValues(positionRows);
@@ -90,7 +90,7 @@ function snapshotPortfolio() {
   // Risk — batch write: Fluid vaults + Aave account (GMX LP has no liquidation risk)
   const riskRows = fluid.riskRows.concat(aave.riskRows);
   if (riskRows.length > 0) {
-    const lastRisk = riskSheet.getLastRow();
+    const lastRisk = Utils.lastDataRow(riskSheet);
     riskSheet
       .getRange(lastRisk + 1, 1, riskRows.length, riskRows[0].length)
       .setValues(riskRows);
@@ -100,6 +100,39 @@ function snapshotPortfolio() {
              ' | positions: ' + positionRows.length +
              ' | risk: '      + riskRows.length +
              ' | errors: '    + (errorFlags.join(',') || 'none'));
+}
+
+// Run this manually from GAS UI or `clasp run debugState` to diagnose write issues
+function debugState() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  var snap = ss.getSheetByName('Snapshots');
+  var pos  = ss.getSheetByName('Positions');
+  var risk = ss.getSheetByName('Risk');
+
+  Logger.log('=== Snapshots ===');
+  Logger.log('getLastRow()   : ' + snap.getLastRow());
+  Logger.log('lastDataRow()  : ' + Utils.lastDataRow(snap));
+  var snapRows = snap.getLastRow() > 1
+    ? snap.getRange(2, 1, Math.min(snap.getLastRow() - 1, 3), snap.getLastColumn()).getValues()
+    : [];
+  snapRows.forEach(function(r) { Logger.log('  ' + JSON.stringify(r)); });
+
+  Logger.log('=== Positions ===');
+  Logger.log('getLastRow()   : ' + pos.getLastRow());
+  Logger.log('lastDataRow()  : ' + Utils.lastDataRow(pos));
+  var posRows = Utils.lastDataRow(pos) > 1
+    ? pos.getRange(2, 1, Math.min(Utils.lastDataRow(pos) - 1, 5), 9).getValues()
+    : [];
+  posRows.forEach(function(r) { Logger.log('  ' + JSON.stringify(r)); });
+
+  Logger.log('=== Risk ===');
+  Logger.log('getLastRow()   : ' + risk.getLastRow());
+  Logger.log('lastDataRow()  : ' + Utils.lastDataRow(risk));
+  var riskRows = Utils.lastDataRow(risk) > 1
+    ? risk.getRange(2, 1, Math.min(Utils.lastDataRow(risk) - 1, 5), 6).getValues()
+    : [];
+  riskRows.forEach(function(r) { Logger.log('  ' + JSON.stringify(r)); });
 }
 
 function initHeaders() {
