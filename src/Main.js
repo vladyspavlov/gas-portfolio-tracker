@@ -60,6 +60,12 @@ function snapshotPortfolio() {
   );
   if (gmx.error) errorFlags.push(gmx.error);
 
+  // Skip entirely if any data source failed — partial snapshots pollute the time series
+  if (errorFlags.length > 0) {
+    Logger.log('Snapshot skipped — will retry next hour. Errors: ' + errorFlags.join(', '));
+    return;
+  }
+
   // Open tabs
   const ss             = SpreadsheetApp.getActiveSpreadsheet();
   const snapshotsSheet = ss.getSheetByName('Snapshots');
@@ -145,7 +151,7 @@ function initHeaders() {
     },
     {
       name: 'Positions',
-      headers: ['timestamp', 'protocol', 'chain', 'position_id', 'token', 'side', 'amount', 'value_usd', 'apy']
+      headers: ['timestamp', 'protocol', 'chain', 'position_id', 'token', 'side', 'amount', 'value_usd', 'apy', 'daily_carry_usd']
     },
     {
       name: 'Risk',

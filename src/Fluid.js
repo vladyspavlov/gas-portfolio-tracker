@@ -35,18 +35,21 @@ const Fluid = {
         const collUSD      = p.collateral.valueUSD != null ? p.collateral.valueUSD : null;
         const debtUSD      = p.debt.valueUSD       != null ? p.debt.valueUSD       : null;
 
+        const supplyApy = p.rates.supplyAPY != null ? p.rates.supplyAPY : null;
+        const borrowApy = p.rates.borrowAPY != null ? p.rates.borrowAPY : null;
+
         positionRows.push([
           timestamp, 'fluid', 'base', posId,
           p.collateral.token, 'supply',
-          collAmt, collUSD,
-          p.rates.supplyAPY != null ? p.rates.supplyAPY : null
+          collAmt, collUSD, supplyApy,
+          collUSD != null && supplyApy != null ? collUSD * supplyApy / 365 : null
         ]);
 
         positionRows.push([
           timestamp, 'fluid', 'base', posId,
           p.debt.token, 'borrow',
-          debtAmt, debtUSD,
-          p.rates.borrowAPY != null ? p.rates.borrowAPY : null
+          debtAmt, debtUSD, borrowApy,
+          debtUSD != null && borrowApy != null ? -debtUSD * borrowApy / 365 : null
         ]);
 
         const hf  = p.health && p.health.healthFactor != null ? p.health.healthFactor : null;

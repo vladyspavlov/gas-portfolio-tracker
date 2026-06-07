@@ -66,20 +66,22 @@ const Aave = {
         else if (sym === 'USDT' || sym === 'USDC' || sym === 'USDC.E') tokenPrice = 1;
 
         if (balance > 0) {
+          const supplyUsd = tokenPrice != null ? balance * tokenPrice : null;
           positionRows.push([
             timestamp, 'aave', 'arbitrum', 'user',
             sym, 'supply',
-            balance, tokenPrice != null ? balance * tokenPrice : null,
-            supplyApy
+            balance, supplyUsd, supplyApy,
+            supplyUsd != null ? supplyUsd * supplyApy / 365 : null
           ]);
         }
 
         if (debt > 0) {
+          const debtUsd = tokenPrice != null ? debt * tokenPrice : null;
           positionRows.push([
             timestamp, 'aave', 'arbitrum', 'user',
             sym, 'borrow',
-            debt, tokenPrice != null ? debt * tokenPrice : null,
-            borrowApy
+            debt, debtUsd, borrowApy,
+            debtUsd != null ? -debtUsd * borrowApy / 365 : null
           ]);
         }
       }
