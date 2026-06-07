@@ -7,15 +7,21 @@ Google Apps Script that snapshots DeFi positions every hour into Google Sheets. 
 ```
 GAS Script                        Google Sheets
 ──────────────                    ─────────────
-Fluid  (Base RPC)    ──┐
+Fluid  (Base svc)    ──┐
 Aave   (Subgraph +   ──┤  raw     Snapshots  →  Metrics  (ARRAYFORMULA)
         Arb RPC)     ──┤  nums →  Positions  →  Dashboard (INDEX/COUNTA)
-GMX    (API + RPC)   ──┘          Risk       →  Charts
+GMX    (API + RPC)   ──┤          Risk       →  Charts
+Lido   (ETH RPC)     ──┘
 ```
 
-Three output tabs:
-- **Snapshots** — one row per hour: oracle prices + error flags
-- **Positions** — one row per token position (supply/borrow/LP) per snapshot
+The schema is **venue-agnostic**: positions are stored as one row per position (not a column per
+protocol), so swapping or mixing venues (GMX ↔ Uniswap ↔ Hyperliquid …) never requires changing
+columns or formulas. NAV is a single `SUMPRODUCT` over the signed value column.
+
+Three output tabs (literals only — all formulas live on Metrics so appends stay correct):
+- **Snapshots** — one row per hour: oracle prices, error flags, wstETH/stETH rate
+- **Positions** — one row per position per snapshot: protocol, chain, `category` (lend/lp), token,
+  side, amount, price, `value_usd` (unsigned) + `value_signed_usd` (debt negative), apy, daily carry
 - **Risk** — one row per vault/account per snapshot: health factor + LTV
 
 ## Stack
@@ -34,6 +40,7 @@ Three output tabs:
 | GMX v2 | Arbitrum | GM token balances, pool prices, APYs |
 | GMX v2 | Base | GM receipt token balances (priced via Arbitrum pool) |
 | GMX Account | Arbitrum | Internal vault balance (DataStore.getUint) |
+| Lido | Ethereum | wstETH→stETH rate (`stEthPerToken`) — noise-free staking yield (optional) |
 
 ## Setup
 
@@ -68,6 +75,7 @@ Create a tab named `Config` with two columns (key, value):
 | `AAVE_SUBGRAPH_ID` | The Graph subgraph ID for Aave v3 Arbitrum |
 | `RPC_ARB_URL` | Arbitrum RPC base URL (without key) |
 | `RPC_BASE_URL` | Base RPC base URL (without key) |
+| `RPC_ETH_URL` | Ethereum mainnet RPC base URL, for the Lido wstETH rate (optional) |
 | `GMX_ARB_MARKETS` | Comma-separated Arbitrum GM market token addresses |
 | `GMX_BASE_GM_TOKENS` | Comma-separated Base GM receipt token addresses |
 | `GMX_ACCOUNT_KEY_ARB` | Precomputed DataStore key for GMX Account balance (optional) |
@@ -81,6 +89,7 @@ In the GAS editor → Project Settings → Script Properties:
 |-----|-------|
 | `RPC_ARB_KEY` | Alchemy / Infura key for Arbitrum |
 | `RPC_BASE_KEY` | Alchemy / Infura key for Base |
+| `RPC_ETH_KEY` | Mainnet RPC key for the Lido wstETH rate (optional) |
 | `GRAPH_API_KEY` | The Graph API key |
 
 ### 5. Deploy and initialize
