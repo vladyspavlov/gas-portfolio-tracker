@@ -15,7 +15,7 @@ const Config = {
 
     // Overlay secrets from PropertiesService (never stored in Config tab)
     const props = PropertiesService.getScriptProperties();
-    const secretKeys = ['RPC_ARB_KEY', 'RPC_BASE_KEY', 'GRAPH_API_KEY', 'COINGECKO_KEY'];
+    const secretKeys = ['RPC_ARB_KEY', 'RPC_BASE_KEY', 'RPC_ETH_KEY', 'GRAPH_API_KEY', 'COINGECKO_KEY'];
     for (const k of secretKeys) {
       const v = props.getProperty(k);
       if (v) config[k] = v;

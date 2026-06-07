@@ -68,20 +68,21 @@ const Aave = {
         if (balance > 0) {
           const supplyUsd = tokenPrice != null ? balance * tokenPrice : null;
           positionRows.push([
-            timestamp, 'aave', 'arbitrum', 'user',
+            timestamp, 'aave', 'arbitrum', 'lend', 'user',
             sym, 'supply',
-            balance, supplyUsd, supplyApy,
+            balance, tokenPrice, supplyUsd, supplyUsd, supplyApy,
             supplyUsd != null ? supplyUsd * supplyApy / 365 : null
           ]);
         }
 
         if (debt > 0) {
-          const debtUsd = tokenPrice != null ? debt * tokenPrice : null;
+          const debtUsd    = tokenPrice != null ? debt * tokenPrice : null;
+          const debtSigned = debtUsd != null ? -debtUsd : null;
           positionRows.push([
-            timestamp, 'aave', 'arbitrum', 'user',
+            timestamp, 'aave', 'arbitrum', 'lend', 'user',
             sym, 'borrow',
-            debt, debtUsd, borrowApy,
-            debtUsd != null ? -debtUsd * borrowApy / 365 : null
+            debt, tokenPrice, debtUsd, debtSigned, borrowApy,
+            debtSigned != null ? debtSigned * borrowApy / 365 : null
           ]);
         }
       }

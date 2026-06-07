@@ -81,10 +81,10 @@ const GMX = {
     } catch (e) {
       Logger.log('GMX shared API parse error: ' + e.message);
       arbMarkets.forEach(function(addr) {
-        positionRows.push([timestamp, 'gmx', 'arbitrum', addr, 'GM', 'lp', null, null, null, null]);
+        positionRows.push([timestamp, 'gmx', 'arbitrum', 'lp', addr, 'GM', 'lp', null, null, null, null, null, null]);
       });
       baseTokens.forEach(function(addr) {
-        positionRows.push([timestamp, 'gmx', 'base', addr, 'GM', 'lp', null, null, null, null]);
+        positionRows.push([timestamp, 'gmx', 'base', 'lp', addr, 'GM', 'lp', null, null, null, null, null, null]);
       });
       return { positionRows: positionRows, error: 'GMX_ERR' };
     }
@@ -119,7 +119,8 @@ const GMX = {
 
         arbCache[i] = { price: price, apy: apy };
 
-        positionRows.push([timestamp, 'gmx', 'arbitrum', marketAddr, 'GM', 'lp', balance, value_usd, apy,
+        // LP value is always positive → unsigned and signed columns are identical
+        positionRows.push([timestamp, 'gmx', 'arbitrum', 'lp', marketAddr, 'GM', 'lp', balance, price, value_usd, value_usd, apy,
           value_usd != null && apy != null ? value_usd * apy / 365 : null]);
 
         Logger.log('GMX ARB [' + marketAddr.slice(0, 8) + ']: bal=' + balance.toFixed(2) +
@@ -127,7 +128,7 @@ const GMX = {
       } catch (e) {
         Logger.log('GMX ARB market error [' + marketAddr.slice(0, 8) + ']: ' + e.message);
         arbCache[i] = null;
-        positionRows.push([timestamp, 'gmx', 'arbitrum', marketAddr, 'GM', 'lp', null, null, null, null]);
+        positionRows.push([timestamp, 'gmx', 'arbitrum', 'lp', marketAddr, 'GM', 'lp', null, null, null, null, null, null]);
       }
     });
 
@@ -138,16 +139,17 @@ const GMX = {
         if (balBody.error) throw new Error('Base balanceOf RPC: ' + balBody.error.message);
         const balance   = Utils.hexToDecimal(balBody.result, 18);
         const cached    = arbCache[i];
-        const value_usd = cached ? balance * cached.price : null;
-        const apy       = cached ? cached.apy             : null;
+        const price     = cached ? cached.price : null;
+        const value_usd = cached ? balance * price : null;
+        const apy       = cached ? cached.apy     : null;
 
-        positionRows.push([timestamp, 'gmx', 'base', tokenAddr, 'GM', 'lp', balance, value_usd, apy,
+        positionRows.push([timestamp, 'gmx', 'base', 'lp', tokenAddr, 'GM', 'lp', balance, price, value_usd, value_usd, apy,
           value_usd != null && apy != null ? value_usd * apy / 365 : null]);
 
         Logger.log('GMX BASE [' + tokenAddr.slice(0, 8) + ']: bal=' + balance.toFixed(2));
       } catch (e) {
         Logger.log('GMX BASE token error [' + tokenAddr.slice(0, 8) + ']: ' + e.message);
-        positionRows.push([timestamp, 'gmx', 'base', tokenAddr, 'GM', 'lp', null, null, null, null]);
+        positionRows.push([timestamp, 'gmx', 'base', 'lp', tokenAddr, 'GM', 'lp', null, null, null, null, null, null]);
       }
     });
 
@@ -171,12 +173,12 @@ const GMX = {
         const value_usd = acctPrice !== null ? balance * acctPrice : null;
         const acctApy   = (matchIdx >= 0 && arbCache[matchIdx]) ? arbCache[matchIdx].apy : null;
 
-        positionRows.push([timestamp, 'gmx', 'arbitrum', 'gmx_account', 'GM', 'lp', balance, value_usd, acctApy,
+        positionRows.push([timestamp, 'gmx', 'arbitrum', 'lp', 'gmx_account', 'GM', 'lp', balance, acctPrice, value_usd, value_usd, acctApy,
           value_usd != null && acctApy != null ? value_usd * acctApy / 365 : null]);
         Logger.log('GMX Account: bal=' + balance.toFixed(2) + (value_usd ? ' val=$' + value_usd.toFixed(2) : ''));
       } catch (e) {
         Logger.log('GMX Account balance error: ' + e.message);
-        positionRows.push([timestamp, 'gmx', 'arbitrum', 'gmx_account', 'GM', 'lp', null, null, null, null]);
+        positionRows.push([timestamp, 'gmx', 'arbitrum', 'lp', 'gmx_account', 'GM', 'lp', null, null, null, null, null, null]);
       }
     }
 

@@ -42,7 +42,10 @@ gas-portfolio/
 │   ├── Fluid.js             ← POST to fluid-data-reader service
 │   ├── Aave.js              ← Aave subgraph GraphQL
 │   ├── GMX.js               ← GMX API + eth_call balanceOf via RPC
-│   └── Utils.js             ← hexToDecimal, retry, safeNull, logger
+│   ├── Lido.js              ← wstETH stEthPerToken() rate (noise-free staking yield)
+│   ├── Utils.js             ← hexToDecimal, retry, safeNull, lastDataRow, logger
+│   └── migrations/          ← one-time, manually-run schema migrations (NNN_ prefix)
+│       └── 001_tall_schema.js  ← positions→13-col tall + Metrics A–S formulas
 ├── .clasp.json.example      ← template for local dev (committed)
 ├── .gitignore
 ├── CLAUDE.md
@@ -93,18 +96,52 @@ git push origin main
 
 ---
 
-## Data flow — Snapshots tab (27 columns, A–AA)
+## Data flow — three "tall" tabs (one row per position, not per protocol)
 
-| Range | Source module | Content |
-|-------|--------------|---------|
-| A | Main.js | `timestamp` (ISO string) |
-| B–E | Fluid.js | ETH, BTC, wstETH, cbBTC prices (USD) |
-| F–M | Aave.js | wstETH collateral, USDT/USDC/ETH debt amounts + APYs |
-| N–T | Fluid.js | cbBTC + wstETH positions (amounts, debt, APYs) |
-| U–Z | GMX.js | GM balances + prices + APRs (Arb + Base) |
-| AA | Main.js | `error_flags` (empty string = OK) |
+The script writes to three **append-only data tabs**. They hold **literal values only — never
+formulas** (see "Append-cursor constraint" below). Adding/removing a venue means adding/removing
+rows, not columns, so Metrics/Dashboard formulas never need editing.
 
-`appendRow()` order must exactly match column order. See TZ section 3 for full column-to-field mapping.
+**Snapshots** — 7 cols, 1 row per snapshot (headline prices + status):
+
+| Col | Field |
+|-----|-------|
+| A | timestamp |
+| B–E | eth_usd, btc_usd, wsteth_usd, cbbtc_usd |
+| F | error_flags (`""` = OK) |
+| G | wsteth_steth_rate — Lido on-chain `stEthPerToken()`; optional, blank if RPC_ETH not set |
+
+**Positions** — 13 cols, N rows per snapshot (one per position):
+
+| Col | Field | Notes |
+|-----|-------|-------|
+| A | timestamp | batch key — identical across all rows of one snapshot |
+| B | protocol | `fluid` / `aave` / `gmx` / … |
+| C | chain | `base` / `arbitrum` |
+| D | category | `lend` / `lp` (future: `perp` / `spot`) — derived in-module |
+| E | position_id | `user` / nft id / market addr / `gmx_account` |
+| F | token | asset symbol |
+| G | side | `supply` / `borrow` / `lp` |
+| H | amount | raw units |
+| I | price_usd | per-row price (new tokens not tied to Snapshots' 4 price cols) |
+| J | value_usd | **unsigned** (≥0) — gross value |
+| K | value_signed_usd | **signed** (debt negative) — `NAV = SUM` of this |
+| L | apy | decimal (not %) |
+| M | daily_carry_usd | signed = `value_signed_usd * apy / 365` |
+
+**Risk** — 6 cols: `timestamp · protocol · chain · position_id · health_factor · ltv`
+
+Every `positionRows.push([...])` must have 13 elements; every `riskRows.push([...])` 6.
+Run `/project:validate-columns` to check all writers.
+
+### Append-cursor constraint (load-bearing)
+
+A formula (ARRAYFORMULA/BYROW) on a tab that gets `appendRow`/`setValues` auto-extends down its
+column, so `getLastRow()` returns the formula's last filled row and the next write lands past the
+real data, leaving gaps. **Therefore the three data tabs stay formula-free; ALL formulas live on
+the Metrics tab** (never appended to). `Utils.lastDataRow()` (scans col A) is the append guard.
+This is why per-row `value_usd` / `value_signed_usd` / `daily_carry_usd` are computed in JS as
+literals — only cross-row *aggregations* belong in Metrics formulas.
 
 ---
 
@@ -115,22 +152,34 @@ git push origin main
 - Secrets fetched from PropertiesService (not from tab)
 - Returns merged object; caller checks for missing keys
 
-### `Fluid.fetch(config)` → array of 11 values `[eth_usd, btc_usd, wsteth_usd, cbbtc_usd, fluid_cbbtc_amount, fluid_debt_usdc_cbbtc, fluid_supply_apy_cbbtc, fluid_borrow_apy_usdc, fluid_wsteth_amount, fluid_debt_usdc_wsteth, fluid_supply_apy_wsteth]`
-- POST to `config.FLUID_SERVICE_URL + "/positions"` with `{ address: config.BASE_ADDRESS }`
-- On error: returns array of 11 `null` values, appends `"FLUID_ERR"` to error_flags
+Each data module exposes `buildRequest(...)` (returns a `UrlFetchApp.fetchAll` request object) and
+`parseResponse(...)` / `parseResult(...)` (returns `{ positionRows, riskRows, prices?, error }`).
+`positionRows` are 13-col arrays, `riskRows` 6-col. `error` is a tag string (`null` on success);
+Main.js collects tags and **skips the whole snapshot** if any module errored (no partial rows).
 
-### `Aave.fetch(config)` → array of 8 values `[aave_wsteth_amount, aave_wsteth_supply_apy, aave_debt_usdt, aave_debt_usdc, aave_debt_eth, aave_borrow_apy_usdt, aave_borrow_apy_usdc, aave_borrow_apy_eth]`
-- POST GraphQL to `config.AAVE_SUBGRAPH_URL`
-- Address must be lowercase in the query
-- APY conversion: `rayValue / 1e27` (keep as decimal, not percent)
-- Token amounts: divide by `10^decimals`
-- On error: 8 nulls + `"AAVE_ERR"`
+### `Fluid.parseResponse(response, timestamp)` → `{ prices, positionRows, riskRows, error }`
+- `buildRequest`: POST to `config.FLUID_SERVICE_URL + "/positions"` with `{ address: config.BASE_ADDRESS }`
+- `prices` (eth/btc/wsteth/cbbtc) feed Snapshots **and** are passed into `Aave.parseResponse` for value_usd
+- Emits a `supply` + a `borrow` position row per vault, `category='lend'`; one risk row per vault
+- On error: empty rows + `'FLUID_ERR'`
 
-### `GMX.fetch(config, chain)` → array of 3 values `[gm_balance, gm_price_usd, pool_apr]`
-- `chain`: `"arb"` or `"base"` — selects correct config keys
-- `gm_balance` comes from `GMX.fetchBalance()` (separate RPC call)
-- `gm_price_usd` and `pool_apr` from GMX HTTP API
-- On error: 3 nulls per chain + `"GMX_ARB_ERR"` or `"GMX_BASE_ERR"`
+### `Aave.parseResponse(response, accountDataResp, timestamp, prices)` → `{ positionRows, riskRows, error }`
+- `buildRequest`: GraphQL to The Graph; address lowercased. `buildAccountDataRequest`: `getUserAccountData` via eth_call
+- APY conversion: `rayValue / 1e27` (decimal, not percent); token amounts ÷ `10^decimals`
+- `supply`/`borrow` rows with `category='lend'`; stablecoins priced at $1, others from Fluid `prices`
+- Account-level HF/LTV → one risk row. On error: empty rows + `'AAVE_ERR'`
+
+### `GMX.parseResult(marketsInfo, apy, arbMarkets, arbBal[], arbSup[], baseTokens, baseBal[], accountResp, accountMarket, timestamp)` → `{ positionRows, error }`
+- Markets/APY come from GMX HTTP API; balances from per-market eth_call `balanceOf` (Arb) + Base RPC
+- GM price = `poolValueMax / totalSupply`; Base tokens reuse the same-index Arb market's price/APY
+- One `lp` row per market/token (`category='lp'`, value positive so unsigned == signed); no risk rows
+- On error: null-filled rows + `'GMX_ERR'`
+
+### `Lido.buildRateRequest(config)` / `Lido.parseRate(response)` → Number | null
+- Mainnet `eth_call` to wstETH `stEthPerToken()` (0x035faf82) → noise-free wstETH→stETH rate (~1.2)
+- **Optional & non-blocking**: `buildRateRequest` returns `null` if `RPC_ETH_URL`/`RPC_ETH_KEY` unset;
+  `parseRate` returns `null` on any failure and never writes to `error_flags` (won't skip the snapshot)
+- Written to Snapshots G; the staking-yield metric uses this instead of the noisy USD price ratio
 
 ### `Utils`
 - `hexToDecimal(hexStr, decimals)` — uint256 hex string → JS Number with given decimal places
@@ -144,10 +193,11 @@ git push origin main
 ```
 1. config = Config.getAll()
 2. if config.ENABLED !== "true" → return early
-3. Parallel: UrlFetchApp.fetchAll([fluid_req, aave_req, gmx_arb_req, gmx_base_req])
-4. Sequential: GMX.fetchBalance(arb), GMX.fetchBalance(base)  ← separate RPC calls
-5. Assemble row[27] in column order A–AA
-6. sheet.appendRow(row)
+3. Build request array dynamically (Fluid, Aave subgraph + accountData, GMX markets/apy,
+   + one balanceOf/totalSupply per GM market) → UrlFetchApp.fetchAll(requests)
+4. Parse Fluid first (its prices feed Aave), then Aave, then GMX
+5. If any module returned an error tag → log and skip (no partial snapshot)
+6. Snapshots.appendRow (6 cols); Positions/Risk batch setValues (13 / 6 cols) via lastDataRow()+1
 7. Logger.log(summary)
 ```
 
@@ -157,23 +207,44 @@ Target execution time: < 15 seconds. GAS timeout is 6 minutes, but hourly trigge
 
 ## `initHeaders()` — one-time setup function
 
-Writes column headers to row 1 of Snapshots tab. Run once manually after first deploy. Must not be called by the trigger.
+Writes headers to row 1 of all three tabs (Snapshots 6, Positions 13, Risk 6). Run once manually
+after first deploy. Must not be called by the trigger.
+
+## `src/migrations/` — one-time schema migrations (run manually, never from trigger)
+
+Numbered (`NNN_`) helpers, run by hand from the GAS editor. They ship in the bundle but no runtime
+code calls them. Add the next one-off as `002_*.js`.
+
+**`001_tall_schema.js`:**
+- `migratePositions()` — old 10-col Positions → new 13-col; guards double-runs; backs up to `Positions_old`
+- `migrateMetricsFormulas()` — rewrites Metrics A–S row-1 array formulas (incl. S = `wsteth_rate`)
+
+Run `migratePositions()` then `migrateMetricsFormulas()` once after deploying the new schema.
 
 ---
 
 ## Sheets formulas — quick reference
 
-**Metrics tab pattern (row 2, extends automatically):**
+Formulas live **only on Metrics/Dashboard** (data tabs stay literal — see Append-cursor constraint).
+
+**Metrics tab pattern** — one array formula per column in row 1, header bundled in:
 ```
-=ARRAYFORMULA(IF(Snapshots!A2:A="", "", {formula referencing Snapshots columns}))
+={"col_name"; BYROW(Snapshots!A2:A, LAMBDA(ts, IF(ts="","",
+   SUMPRODUCT((Positions!A$2:A=ts) * <attribute filters> * IFERROR(Positions!<col>$2:$,0)))))}
+```
+NAV is venue-agnostic — sums the signed column with no per-protocol terms:
+```
+={"nav_usd"; BYROW(Snapshots!A2:A, LAMBDA(ts, IF(ts="","",
+   SUMPRODUCT((Positions!A$2:A=ts) * IFERROR(Positions!K$2:K,0)))))}
 ```
 
 **Dashboard tab pattern (always last row):**
 ```
-=INDEX(Metrics!O:O, COUNTA(Metrics!O:O))
+=INDEX(Metrics!L:L, COUNTA(Metrics!L:L))
 ```
 
-Do not add formulas to GAS. If a calculation is needed, confirm it belongs in Sheets and reference the TZ for the correct formula.
+Do not add formulas to GAS, and never to a data tab. Aggregate by attribute (protocol/category/
+side), not by hardcoded column, so new venues are absorbed without formula edits.
 
 ---
 
@@ -208,7 +279,7 @@ Claude Code supports sub-agents via the `Task` tool, which run in parallel in is
 |---|---|
 | Parallel independent work | ❌ Utils → Config → modules → Main (sequential dependencies) |
 | Agent can verify its own result | ❌ GAS has no local test runner |
-| Scope exceeds single context | ❌ 6 files, 1–2 sessions |
+| Scope exceeds single context | ❌ 7 files, 1–2 sessions |
 | Isolated research tasks | ❌ none |
 
 **Condition for revisiting:** if there is a need to explore several new APIs in parallel (e.g. adding 3 independent protocols simultaneously), or the project grows to 20+ files — then orchestrator + sub-agents per module would be justified.
@@ -221,7 +292,7 @@ Commands in `.claude/commands/` are invoked with the `/project:` prefix:
 
 ```
 /project:check-secrets      ← scans src/ before commit
-/project:validate-columns   ← checks the 27-column order in Main.js
+/project:validate-columns   ← checks the tall-tab schema (Snapshots 6 / Positions 13 / Risk 6)
 /project:add-data-source    ← step-by-step guide for adding a new protocol
 /project:save-state         ← save session state to .claude/state.md
 /project:restore-state      ← restore state at the start of a new session
@@ -296,15 +367,15 @@ Claude Code will load both files and resume without needing the full conversatio
 
 **GAS:**
 - `snapshotPortfolio()` completes without errors in Execution log
-- New row in Snapshots every hour
-- All 27 columns populated or explicitly `null`
-- `error_flags` column (AA) is empty string during normal operation
+- New rows every hour: 1 in Snapshots (6 cols), N in Positions (13 cols), M in Risk (6 cols)
+- All columns populated or explicitly `null`; Positions rows share one timestamp per snapshot
+- `error_flags` (Snapshots F) empty during normal operation; any module error skips the whole snapshot
 - `git push main` → code updated in GAS via CI/CD
 
-**Sheets formulas:**
-- Metrics row 2 uses ARRAYFORMULA (no manual drag-down needed)
-- New Snapshots row → Metrics row appears automatically
+**Sheets formulas (Metrics tab only — data tabs stay formula-free):**
+- Each Metrics column is one row-1 array formula (`={"header"; BYROW(...)}`); extends automatically
+- New Positions/Risk rows → Metrics aggregates update with no manual edits
 - Dashboard always reflects the latest snapshot
-- `nav_usd` = aave_net_usd + fluid_net_usd + gmx_arb_position_usd + gmx_base_position_usd
-- `net_carry_daily_usd` is non-zero (positive or negative depending on rates)
+- `nav_usd` = `SUMPRODUCT((Positions!A=ts) * value_signed_usd)` — venue-agnostic, absorbs new protocols
+- `net_carry_daily_usd` is non-zero (sum of signed `daily_carry_usd`)
 - `wsteth_eth_ratio` slowly increases over time (visible on weekly chart)

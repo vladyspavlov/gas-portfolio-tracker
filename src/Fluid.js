@@ -38,18 +38,24 @@ const Fluid = {
         const supplyApy = p.rates.supplyAPY != null ? p.rates.supplyAPY : null;
         const borrowApy = p.rates.borrowAPY != null ? p.rates.borrowAPY : null;
 
+        const collPrice  = (collUSD != null && collAmt) ? collUSD / collAmt : null;
+        const debtPrice  = (debtUSD != null && debtAmt) ? debtUSD / debtAmt : null;
+        const collSigned = collUSD;                            // collateral: positive
+        const debtSigned = debtUSD != null ? -debtUSD : null;  // debt: negative
+
+        // category=lend; value_usd is unsigned (>=0), value_signed_usd carries the sign
         positionRows.push([
-          timestamp, 'fluid', 'base', posId,
+          timestamp, 'fluid', 'base', 'lend', posId,
           p.collateral.token, 'supply',
-          collAmt, collUSD, supplyApy,
-          collUSD != null && supplyApy != null ? collUSD * supplyApy / 365 : null
+          collAmt, collPrice, collUSD, collSigned, supplyApy,
+          collSigned != null && supplyApy != null ? collSigned * supplyApy / 365 : null
         ]);
 
         positionRows.push([
-          timestamp, 'fluid', 'base', posId,
+          timestamp, 'fluid', 'base', 'lend', posId,
           p.debt.token, 'borrow',
-          debtAmt, debtUSD, borrowApy,
-          debtUSD != null && borrowApy != null ? -debtUSD * borrowApy / 365 : null
+          debtAmt, debtPrice, debtUSD, debtSigned, borrowApy,
+          debtSigned != null && borrowApy != null ? debtSigned * borrowApy / 365 : null
         ]);
 
         const hf  = p.health && p.health.healthFactor != null ? p.health.healthFactor : null;

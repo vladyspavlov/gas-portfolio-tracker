@@ -38,6 +38,12 @@ function snapshotPortfolio() {
   const acctBalIdx     = acctBalReq ? requests.length : -1;
   if (acctBalReq) requests.push(acctBalReq);
 
+  // Lido wstETH exchange rate (optional — requires RPC_ETH_URL + RPC_ETH_KEY).
+  // Noise-free staking-rate source; never blocks the snapshot if absent or failing.
+  const lidoRateReq    = Lido.buildRateRequest(config);
+  const lidoRateIdx    = lidoRateReq ? requests.length : -1;
+  if (lidoRateReq) requests.push(lidoRateReq);
+
   const responses = UrlFetchApp.fetchAll(requests);
 
   // Parse — Fluid first: its oracle prices are passed to Aave for value_usd computation
@@ -60,6 +66,9 @@ function snapshotPortfolio() {
   );
   if (gmx.error) errorFlags.push(gmx.error);
 
+  // Optional, non-blocking: null if not configured or read failed (no error_flags entry)
+  const wstethRate = lidoRateIdx >= 0 ? Lido.parseRate(responses[lidoRateIdx]) : null;
+
   // Skip entirely if any data source failed — partial snapshots pollute the time series
   if (errorFlags.length > 0) {
     Logger.log('Snapshot skipped — will retry next hour. Errors: ' + errorFlags.join(', '));
@@ -81,7 +90,8 @@ function snapshotPortfolio() {
     timestamp,
     fluid.prices.eth_usd, fluid.prices.btc_usd,
     fluid.prices.wsteth_usd, fluid.prices.cbbtc_usd,
-    errorFlags.join(',')
+    errorFlags.join(','),
+    wstethRate != null ? wstethRate : ''
   ]);
 
   // Positions — batch write: Fluid + Aave + GMX rows
@@ -128,7 +138,7 @@ function debugState() {
   Logger.log('getLastRow()   : ' + pos.getLastRow());
   Logger.log('lastDataRow()  : ' + Utils.lastDataRow(pos));
   var posRows = Utils.lastDataRow(pos) > 1
-    ? pos.getRange(2, 1, Math.min(Utils.lastDataRow(pos) - 1, 5), 9).getValues()
+    ? pos.getRange(2, 1, Math.min(Utils.lastDataRow(pos) - 1, 5), 13).getValues()
     : [];
   posRows.forEach(function(r) { Logger.log('  ' + JSON.stringify(r)); });
 
@@ -147,11 +157,11 @@ function initHeaders() {
   var tabs = [
     {
       name: 'Snapshots',
-      headers: ['timestamp', 'eth_usd', 'btc_usd', 'wsteth_usd', 'cbbtc_usd', 'error_flags']
+      headers: ['timestamp', 'eth_usd', 'btc_usd', 'wsteth_usd', 'cbbtc_usd', 'error_flags', 'wsteth_steth_rate']
     },
     {
       name: 'Positions',
-      headers: ['timestamp', 'protocol', 'chain', 'position_id', 'token', 'side', 'amount', 'value_usd', 'apy', 'daily_carry_usd']
+      headers: ['timestamp', 'protocol', 'chain', 'category', 'position_id', 'token', 'side', 'amount', 'price_usd', 'value_usd', 'value_signed_usd', 'apy', 'daily_carry_usd']
     },
     {
       name: 'Risk',
