@@ -44,6 +44,11 @@ function snapshotPortfolio() {
   const lidoRateIdx    = lidoRateReq ? requests.length : -1;
   if (lidoRateReq) requests.push(lidoRateReq);
 
+  // Lido published 7-day SMA APR — public, no key. Used as the warm-up fallback for the
+  // staking-yield metric (before the on-chain rate has a full 7-day window).
+  const lidoAprIdx     = requests.length;
+  requests.push(Lido.buildAprRequest());
+
   const responses = UrlFetchApp.fetchAll(requests);
 
   // Parse — Fluid first: its oracle prices are passed to Aave for value_usd computation
@@ -68,6 +73,7 @@ function snapshotPortfolio() {
 
   // Optional, non-blocking: null if not configured or read failed (no error_flags entry)
   const wstethRate = lidoRateIdx >= 0 ? Lido.parseRate(responses[lidoRateIdx]) : null;
+  const lidoApr    = Lido.parseApr(responses[lidoAprIdx]);  // non-blocking; null on failure
 
   // Skip entirely if any data source failed — partial snapshots pollute the time series
   if (errorFlags.length > 0) {
@@ -91,7 +97,8 @@ function snapshotPortfolio() {
     fluid.prices.eth_usd, fluid.prices.btc_usd,
     fluid.prices.wsteth_usd, fluid.prices.cbbtc_usd,
     errorFlags.join(','),
-    wstethRate != null ? wstethRate : ''
+    wstethRate != null ? wstethRate : '',
+    lidoApr != null ? lidoApr : ''
   ]);
 
   // Positions — batch write: Fluid + Aave + GMX rows
@@ -157,7 +164,7 @@ function initHeaders() {
   var tabs = [
     {
       name: 'Snapshots',
-      headers: ['timestamp', 'eth_usd', 'btc_usd', 'wsteth_usd', 'cbbtc_usd', 'error_flags', 'wsteth_steth_rate']
+      headers: ['timestamp', 'eth_usd', 'btc_usd', 'wsteth_usd', 'cbbtc_usd', 'error_flags', 'wsteth_steth_rate', 'lido_apr']
     },
     {
       name: 'Positions',

@@ -7,8 +7,9 @@
 //   migratePositions()        — converts the old 10-col Positions layout to the new 13-col layout
 //                               (adds category + price_usd + value_signed_usd). Guards against
 //                               double-runs; backs up the original tab to "Positions_old" first.
-//   migrateMetricsFormulas()  — rewrites the Metrics tab row-1 array formulas (A–S) to the new
-//                               Positions column letters (+ S = noise-free wsteth_rate passthrough).
+//   migrateMetricsFormulas()  — rewrites the Metrics tab row-1 array formulas (A–W) to the new
+//                               Positions column letters (S = wsteth_rate, T = lido_apr,
+//                               U/V/W = per-row carry/staking/true-yield series for charts).
 //
 // Run migratePositions() FIRST, then migrateMetricsFormulas().
 
@@ -110,7 +111,14 @@ const Migrate = {
     '={"fluid_ltv"; BYROW(Snapshots!A2:A,LAMBDA(ts,IF(ts="","",IFERROR(MIN(MAXIFS(Risk!F$2:F,Risk!A$2:A,ts,Risk!B$2:B,"fluid"),1),""))))}',
     '={"wsteth_amount"; BYROW(Snapshots!A2:A,LAMBDA(ts,IF(ts="","",SUMPRODUCT((Positions!A$2:A=ts)*(Positions!F$2:F="WSTETH")*(Positions!G$2:G="supply")*IFERROR(Positions!H$2:H,0)))))}',
     // S: noise-free wstETH->stETH exchange rate (passthrough of Snapshots G) for the staking-yield metric
-    '={"wsteth_rate"; ARRAYFORMULA(IF(Snapshots!A2:A="","",Snapshots!G2:G))}'
+    '={"wsteth_rate"; ARRAYFORMULA(IF(Snapshots!A2:A="","",Snapshots!G2:G))}',
+    // T: Lido published 7-day SMA APR (passthrough of Snapshots H) — warm-up fallback for staking yield
+    '={"lido_apr"; ARRAYFORMULA(IF(Snapshots!A2:A="","",Snapshots!H2:H))}',
+    // U–W: per-row yield series for charts (decimals; format as %). Staking uses lido_apr (T) for a
+    // smooth, full-history line. U = carry/NAV, V = staking/NAV, W = U+V = true annual yield.
+    '={"net_carry_yield_pct"; ARRAYFORMULA(IF(A2:A="","", IFERROR(M2:M*365/L2:L,"")))}',
+    '={"staking_yield_pct"; ARRAYFORMULA(IF(A2:A="","", IFERROR(R2:R*C2:C*T2:T/L2:L,"")))}',
+    '={"true_annual_yield_pct"; ARRAYFORMULA(IF(A2:A="","", IFERROR((M2:M*365+R2:R*C2:C*T2:T)/L2:L,"")))}'
   ],
 
   migrateMetricsFormulas: function() {

@@ -110,6 +110,7 @@ rows, not columns, so Metrics/Dashboard formulas never need editing.
 | B–E | eth_usd, btc_usd, wsteth_usd, cbbtc_usd |
 | F | error_flags (`""` = OK) |
 | G | wsteth_steth_rate — Lido on-chain `stEthPerToken()`; optional, blank if RPC_ETH not set |
+| H | lido_apr — Lido published 7-day SMA APR (decimal); warm-up fallback for staking yield |
 
 **Positions** — 13 cols, N rows per snapshot (one per position):
 
@@ -180,6 +181,8 @@ Main.js collects tags and **skips the whole snapshot** if any module errored (no
 - **Optional & non-blocking**: `buildRateRequest` returns `null` if `RPC_ETH_URL`/`RPC_ETH_KEY` unset;
   `parseRate` returns `null` on any failure and never writes to `error_flags` (won't skip the snapshot)
 - Written to Snapshots G; the staking-yield metric uses this instead of the noisy USD price ratio
+- `Lido.buildAprRequest()` / `parseApr(response)` → published 7-day SMA APR (decimal) from a public
+  GET (no key); written to Snapshots H as the warm-up fallback before G has a full 7-day window
 
 ### `Utils`
 - `hexToDecimal(hexStr, decimals)` — uint256 hex string → JS Number with given decimal places
@@ -217,7 +220,8 @@ code calls them. Add the next one-off as `002_*.js`.
 
 **`001_tall_schema.js`:**
 - `migratePositions()` — old 10-col Positions → new 13-col; guards double-runs; backs up to `Positions_old`
-- `migrateMetricsFormulas()` — rewrites Metrics A–S row-1 array formulas (incl. S = `wsteth_rate`)
+- `migrateMetricsFormulas()` — rewrites Metrics A–W row-1 array formulas (S = `wsteth_rate`,
+  T = `lido_apr`, U/V/W = per-row net-carry / staking / true-annual-yield % series for charts)
 
 Run `migratePositions()` then `migrateMetricsFormulas()` once after deploying the new schema.
 
