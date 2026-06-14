@@ -8,15 +8,18 @@ const Utils = {
     return Number(whole) + Number(remainder) / (10 ** decimals);
   },
 
-  // Retry fn up to `times` attempts with `delayMs` between each
-  retry: function(fn, times, delayMs) {
+  // Retry fn up to `times` attempts. Sleeps `delayMs * backoffFactor^i` between attempts —
+  // backoffFactor defaults to 1 (fixed delay, original behavior); pass 2 for exponential backoff
+  // (e.g. 4s, 8s, 16s …) as recommended for 429 rate-limit responses.
+  retry: function(fn, times, delayMs, backoffFactor) {
+    const factor = backoffFactor || 1;
     let lastError;
     for (let i = 0; i < times; i++) {
       try {
         return fn();
       } catch (e) {
         lastError = e;
-        if (i < times - 1) Utilities.sleep(delayMs);
+        if (i < times - 1) Utilities.sleep(delayMs * Math.pow(factor, i));
       }
     }
     throw lastError;

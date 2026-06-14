@@ -173,12 +173,17 @@ function initHeaders() {
     {
       name: 'Risk',
       headers: ['timestamp', 'protocol', 'chain', 'position_id', 'health_factor', 'ltv']
+    },
+    {
+      name: 'Transactions',
+      headers: ['timestamp', 'chain', 'protocol', 'counterparty', 'token', 'direction',
+                'amount', 'price_usd_at_tx', 'value_usd', 'capital_flow_signed_usd',
+                'tx_hash']
     }
   ];
 
   tabs.forEach(function(t) {
-    var sheet = ss.getSheetByName(t.name);
-    if (!sheet) throw new Error(t.name + ' tab not found');
+    var sheet = ss.getSheetByName(t.name) || ss.insertSheet(t.name);
     sheet.getRange(1, 1, 1, t.headers.length).setValues([t.headers]);
     Logger.log(t.name + ' headers written: ' + t.headers.length + ' columns');
   });

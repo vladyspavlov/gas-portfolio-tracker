@@ -134,3 +134,8 @@ const Migrate = {
     Logger.log('migrateMetricsFormulas: ' + Migrate.METRICS_FORMULAS.length + ' column formulas written (A–R)');
   }
 };
+
+// Top-level wrappers — object methods don't appear in the GAS editor's Run dropdown. Run
+// migratePositions() first, then migrateMetricsFormulas().
+function migratePositions()       { Migrate.migratePositions(); }
+function migrateMetricsFormulas() { Migrate.migrateMetricsFormulas(); }
