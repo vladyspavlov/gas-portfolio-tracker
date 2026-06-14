@@ -18,11 +18,24 @@ The schema is **venue-agnostic**: positions are stored as one row per position (
 protocol), so swapping or mixing venues (GMX ↔ Uniswap ↔ Hyperliquid …) never requires changing
 columns or formulas. NAV is a single `SUMPRODUCT` over the signed value column.
 
-Three output tabs (literals only — all formulas live on Metrics so appends stay correct):
+Four output tabs (literals only — all formulas live on Metrics so appends stay correct):
 - **Snapshots** — one row per hour: oracle prices, error flags, wstETH/stETH rate
 - **Positions** — one row per position per snapshot: protocol, chain, `category` (lend/lp), token,
   side, amount, price, `value_usd` (unsigned) + `value_signed_usd` (debt negative), apy, daily carry
 - **Risk** — one row per vault/account per snapshot: health factor + LTV
+- **Transactions** — one row per on-chain capital flow (supply/borrow/withdraw/repay), priced at the
+  transaction date, for **cost-basis P&L** (`P&L = NAV − net capital invested`). Written by a
+  separate `syncTransactions()` job, not the hourly snapshot — see below.
+
+### Cost-basis P&L
+
+`syncTransactions()` (its own ~6h trigger) backfills capital movements between the wallet and known
+Aave/Fluid/GMX contracts via Infura `eth_getLogs` (ERC-20 `Transfer` events), prices each at its date
+via the **CoinGecko keyless public API**, and signs them by direction (into a protocol = capital in,
+out = returned). Two Metrics columns derive the rest, venue-agnostically:
+`net_capital_in_usd` (running signed sum) and `pnl_usd = nav_usd − net_capital_in_usd`. It's
+idempotent (keyed on `tx_hash`+`log_index`) and resumable (per-chain block cursor in Script
+Properties), so a full-history backfill can span several runs.
 
 ## Stack
 
@@ -41,6 +54,8 @@ Three output tabs (literals only — all formulas live on Metrics so appends sta
 | GMX v2 | Base | GM receipt token balances (priced via Arbitrum pool) |
 | GMX Account | Arbitrum | Internal vault balance (DataStore.getUint) |
 | Lido | Ethereum | wstETH→stETH rate (`stEthPerToken`) — noise-free staking yield (optional) |
+| Capital flows | Arbitrum + Base | ERC-20 `Transfer` events to/from known protocol contracts via Infura `eth_getLogs` — cost basis |
+| CoinGecko | — | Historical daily price-at-transaction (keyless public API, no key) |
 
 ## Setup
 

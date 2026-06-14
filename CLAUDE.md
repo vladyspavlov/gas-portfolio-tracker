@@ -43,9 +43,13 @@ gas-portfolio/
 │   ├── Aave.js              ← Aave subgraph GraphQL
 │   ├── GMX.js               ← GMX API + eth_call balanceOf via RPC
 │   ├── Lido.js              ← wstETH stEthPerToken() rate (noise-free staking yield)
+│   ├── Transactions.js      ← DORMANT auto-scanner (eth_getLogs); superseded by the MANUAL ledger
 │   ├── Utils.js             ← hexToDecimal, retry, safeNull, lastDataRow, logger
 │   └── migrations/          ← one-time, manually-run schema migrations (NNN_ prefix)
-│       └── 001_tall_schema.js  ← positions→13-col tall + Metrics A–S formulas
+│       ├── 001_tall_schema.js                 ← positions→13-col tall + Metrics A–W formulas
+│       ├── 002_transactions_pnl.js            ← Transactions tab + Metrics X/Y (net_capital_in, pnl)
+│       ├── 003_transactions_price_formulas.js ← (interim) per-row price formulas + cursor reset
+│       └── 004_manual_ledger.js               ← Transactions → manual ledger (value/flow array-formulas)
 ├── .clasp.json.example      ← template for local dev (committed)
 ├── .gitignore
 ├── CLAUDE.md
@@ -96,11 +100,17 @@ git push origin main
 
 ---
 
-## Data flow — three "tall" tabs (one row per position, not per protocol)
+## Data flow — four "tall" tabs (one row per position/event, not per protocol)
 
-The script writes to three **append-only data tabs**. They hold **literal values only — never
-formulas** (see "Append-cursor constraint" below). Adding/removing a venue means adding/removing
-rows, not columns, so Metrics/Dashboard formulas never need editing.
+The script writes to three **append-only data tabs** (Snapshots/Positions/Risk). They hold **literal
+values only — never formulas** (see "Append-cursor constraint" below). Adding/removing a venue means
+adding/removing rows, not columns, so Metrics/Dashboard formulas never need editing.
+
+The three data tabs are written by the **hourly** `snapshotPortfolio()`. A fourth tab,
+**Transactions**, is a **manually-maintained capital-flow ledger** — you type your real money-in/out
+events by hand and Sheets computes the P&L (see "Transactions — manual ledger" below). It is NOT
+written by any trigger; the old `syncTransactions()` auto-scanner is **dormant** (it cannot see
+native-ETH exchange funding and the keyless price API is unreliable from GAS — see that section).
 
 **Snapshots** — 7 cols, 1 row per snapshot (headline prices + status):
 
@@ -132,17 +142,39 @@ rows, not columns, so Metrics/Dashboard formulas never need editing.
 
 **Risk** — 6 cols: `timestamp · protocol · chain · position_id · health_factor · ltv`
 
-Every `positionRows.push([...])` must have 13 elements; every `riskRows.push([...])` 6.
-Run `/project:validate-columns` to check all writers.
+**Transactions — manual ledger** — 11 cols, one row per real money-in/out event you enter by hand.
+You fill **A, B, E, F, G, H**; `value_usd` (I) and `capital_flow_signed_usd` (J) are **column
+array-formulas** installed by migration 004 (header bundled in row 1, auto-extend as you add rows):
 
-### Append-cursor constraint (load-bearing)
+| Col | Field | Notes |
+|-----|-------|-------|
+| A | timestamp | date of the tx (used to align with the P&L time series) — **you enter** |
+| B | chain | `arbitrum` / `base` — you enter (reference only) |
+| C | protocol | optional note (counterparty label) |
+| D | counterparty | optional note (address) |
+| E | token | asset symbol — you enter |
+| F | direction | **`in`** = money into wallet (exchange→you) = **+**; **`out`** = money out = **−** — you enter |
+| G | amount | token units — you enter |
+| H | price_usd_at_tx | USD price that day — **you enter** (blank → I/J blank until filled) |
+| I | value_usd | **formula** `=amount × price` (col array-formula) |
+| J | capital_flow_signed_usd | **formula** `=value × sign(direction)`; **Net Capital In = SUM of this** |
+| K | tx_hash | optional note — explorer reference (no `log_index`/`block_number`: those were scanner-only) |
+
+Every `positionRows.push([...])` must have 13 elements; every `riskRows.push([...])` 6.
+Run `/project:validate-columns` to check the Positions/Risk/Snapshots writers. (Transactions has no
+writer — it's hand-entered.)
+
+### Append-cursor constraint (load-bearing — applies to the 3 auto-written tabs)
 
 A formula (ARRAYFORMULA/BYROW) on a tab that gets `appendRow`/`setValues` auto-extends down its
 column, so `getLastRow()` returns the formula's last filled row and the next write lands past the
-real data, leaving gaps. **Therefore the three data tabs stay formula-free; ALL formulas live on
-the Metrics tab** (never appended to). `Utils.lastDataRow()` (scans col A) is the append guard.
-This is why per-row `value_usd` / `value_signed_usd` / `daily_carry_usd` are computed in JS as
-literals — only cross-row *aggregations* belong in Metrics formulas.
+real data, leaving gaps. **Therefore the three auto-written data tabs (Snapshots/Positions/Risk)
+stay formula-free; their aggregations live on the Metrics tab** (never appended to).
+`Utils.lastDataRow()` (scans col A) is the append guard. This is why per-row Positions
+`value_usd` / `value_signed_usd` / `daily_carry_usd` are computed in JS as literals.
+
+**The Transactions tab is exempt** — nothing appends to it programmatically (it's hand-entered), so
+its `value_usd` / `capital_flow_signed_usd` columns CAN safely be auto-extending array-formulas.
 
 ---
 
@@ -184,6 +216,19 @@ Main.js collects tags and **skips the whole snapshot** if any module errored (no
 - `Lido.buildAprRequest()` / `parseApr(response)` → published 7-day SMA APR (decimal) from a public
   GET (no key); written to Snapshots H as the warm-up fallback before G has a full 7-day window
 
+### `Txns` (Transactions.js) — DORMANT auto-scanner (kept for reference, gated off)
+- **Status: not used.** The capital-flow ledger is now **hand-entered** (see "Transactions — manual
+  ledger" + migration 004). This scanner stays in the bundle, gated by `TX_SYNC_ENABLED` (keep it
+  `false`) with no trigger. **Why it was abandoned:** `eth_getLogs` only sees ERC-20 `Transfer`
+  events, so **native-ETH exchange funding** (e.g. ETH withdrawn from Kraken — the actual cost
+  basis) is invisible to it; and the keyless CoinGecko price API is throttled hard from GAS's shared
+  IPs. A block-explorer API (Etherscan V2: `txlist`+`txlistinternal`+`tokentx`) would be the right
+  tool to revive automation, but manual entry was chosen instead (transactions are infrequent).
+- If revived: it scans Infura `eth_getLogs` for `Transfer` topic-filtered by wallet, labels each
+  base-asset transfer by `Txns.PROTOCOLS[chain]` (or `'external'`), prices via CoinGecko, and is
+  idempotent (`tx_hash`,`log_index`) + resumable (`TX_SCANNED_<ARB|BASE>` cursor, short chain code —
+  NOT `chain.toUpperCase()`). `direction 'in'` = **+** (received), `'out'` = **−** (sent).
+
 ### `Utils`
 - `hexToDecimal(hexStr, decimals)` — uint256 hex string → JS Number with given decimal places
 - `retry(fn, times, delayMs)` — wraps any function, returns last error if all attempts fail
@@ -208,15 +253,40 @@ Target execution time: < 15 seconds. GAS timeout is 6 minutes, but hourly trigge
 
 ---
 
+## `syncTransactions()` execution flow (DORMANT — kept for reference, no trigger)
+
+> Not in use. The Transactions tab is hand-entered (see migration 004). Keep `TX_SYNC_ENABLED=false`
+> and set no trigger on this function. Documented here only so the code is understandable if revived.
+
+```
+1. config = Config.getAll(); if TX_SYNC_ENABLED !== "true" → return early
+2. Read existing (tx_hash, log_index) from Transactions K/L → idempotency set
+3. For each chain with a non-empty PROTOCOLS map + RPC/wallet config:
+   a. eth_blockNumber → head; from = max(TX_SCANNED_<CHAIN>+1, TX_START_BLOCK_<CHAIN>)
+   b. Walk [from..head] in block chunks; per chunk fetchAll(2 eth_getLogs: out + in),
+      adaptive-halve on "more than 10000 results"/"query timeout"; collect recognized transfers
+4. Drop already-seen + intra-run dup transfers
+5. eth_getBlockByNumber for each UNIQUE block → UTC timestamp
+6. CoinGecko keyless /history per UNIQUE (coingeckoId, date); stables = $1; Utils.retry + throttle
+7. Build 13-col rows (value_usd = amount*price; flow = value_usd * (out?+1:-1)); setValues append
+8. Persist TX_SCANNED_<CHAIN> (only now — re-scan-safe on any earlier failure); Logger.log(summary)
+```
+
+Resumable: a backfill that nears the time limit just continues next run (cursor advances per run;
+dedup prevents duplicates). Set this trigger on `syncTransactions` separately from the hourly one.
+
+---
+
 ## `initHeaders()` — one-time setup function
 
-Writes headers to row 1 of all three tabs (Snapshots 6, Positions 13, Risk 6). Run once manually
-after first deploy. Must not be called by the trigger.
+Writes headers to row 1 of all four tabs (Snapshots 6, Positions 13, Risk 6, Transactions 13),
+creating any tab that doesn't exist. Run once manually after first deploy. Must not be called by
+a trigger.
 
 ## `src/migrations/` — one-time schema migrations (run manually, never from trigger)
 
 Numbered (`NNN_`) helpers, run by hand from the GAS editor. They ship in the bundle but no runtime
-code calls them. Add the next one-off as `002_*.js`.
+code calls them. Add the next one-off as `005_*.js`.
 
 **`001_tall_schema.js`:**
 - `migratePositions()` — old 10-col Positions → new 13-col; guards double-runs; backs up to `Positions_old`
@@ -225,11 +295,33 @@ code calls them. Add the next one-off as `002_*.js`.
 
 Run `migratePositions()` then `migrateMetricsFormulas()` once after deploying the new schema.
 
+**`002_transactions_pnl.js`:**
+- `initTransactionsTab()` — creates the Transactions tab + writes its 13-col header (idempotent)
+- `migrateMetricsPnl()` — APPENDS Metrics X = `net_capital_in_usd` (running SUM of **all**
+  `Transactions!J` ≤ ts — no protocol filter, since the manual ledger holds only real flows) and
+  Y = `pnl_usd` = `nav_usd(L) − net_capital_in_usd(X)`, without touching A–W (guards L is `nav_usd`)
+
+**`003_transactions_price_formulas.js`** (interim, superseded by 004 — only needed if you ever ran
+the auto-scanner): `reformulaTransactions()` rewrites per-row I/J price formulas; `resetScanCursors()`
+clears `TX_SCANNED_*` Script Properties. Not part of the manual-ledger setup.
+
+**`004_manual_ledger.js`:**
+- `setupManualLedger()` — **clears existing Transactions data rows** and installs the auto-extending
+  `value_usd` (I) and `capital_flow_signed_usd` (J, `in=+`/`out=−`) **column array-formulas**.
+
+**Manual-ledger setup (run once, in order):** `initTransactionsTab()` → `setupManualLedger()` →
+`migrateMetricsPnl()`. Then set `TX_SYNC_ENABLED=false` in Config and add **no** trigger on
+`syncTransactions`. Enter capital flows by hand (A timestamp · B chain · E token · F `in`/`out` ·
+G amount · H price_usd); I/J and the Metrics P&L update automatically.
+
 ---
 
 ## Sheets formulas — quick reference
 
-Formulas live **only on Metrics/Dashboard** (data tabs stay literal — see Append-cursor constraint).
+Formulas live **on Metrics/Dashboard** (the three auto-written data tabs stay literal — see
+Append-cursor constraint). The **manual Transactions tab** is the one exception: its `value_usd` (I)
+and `capital_flow_signed_usd` (J) are column array-formulas (installed by migration 004), safe
+because nothing appends to that tab programmatically.
 
 **Metrics tab pattern** — one array formula per column in row 1, header bundled in:
 ```
@@ -241,14 +333,23 @@ NAV is venue-agnostic — sums the signed column with no per-protocol terms:
 ={"nav_usd"; BYROW(Snapshots!A2:A, LAMBDA(ts, IF(ts="","",
    SUMPRODUCT((Positions!A$2:A=ts) * IFERROR(Positions!K$2:K,0)))))}
 ```
+Overall P&L (Metrics X/Y, from migration 002) — venue-agnostic. Net capital in is the running signed
+sum of your hand-entered capital flows (`in=+`/`out=−`) up to each snapshot; P&L is current NAV minus
+that. NAV is DeFi positions only, so idle (undeployed) wallet balances are NOT included:
+```
+X ={"net_capital_in_usd"; BYROW(Snapshots!A2:A, LAMBDA(ts, IF(ts="","",
+     SUMPRODUCT((Transactions!A$2:A<>"") * (Transactions!A$2:A<=ts) * IFERROR(Transactions!J$2:J,0)))))}
+Y ={"pnl_usd"; ARRAYFORMULA(IF(Snapshots!A2:A="","", L2:L - X2:X))}   // nav_usd(L) − net_capital_in(X)
+```
 
 **Dashboard tab pattern (always last row):**
 ```
 =INDEX(Metrics!L:L, COUNTA(Metrics!L:L))
 ```
 
-Do not add formulas to GAS, and never to a data tab. Aggregate by attribute (protocol/category/
-side), not by hardcoded column, so new venues are absorbed without formula edits.
+Do not add formulas to GAS, and never to an **auto-written** data tab (Snapshots/Positions/Risk).
+Aggregate by attribute (protocol/category/side), not by hardcoded column, so new venues are absorbed
+without formula edits.
 
 ---
 
@@ -375,11 +476,17 @@ Claude Code will load both files and resume without needing the full conversatio
 - All columns populated or explicitly `null`; Positions rows share one timestamp per snapshot
 - `error_flags` (Snapshots F) empty during normal operation; any module error skips the whole snapshot
 - `git push main` → code updated in GAS via CI/CD
+- Transactions is a **manual ledger**: hand-entered rows compute `value_usd`/`capital_flow_signed_usd`
+  via the col-I/J array-formulas (`in=+`/`out=−`); `syncTransactions` stays dormant (`TX_SYNC_ENABLED=false`,
+  no trigger)
 
-**Sheets formulas (Metrics tab only — data tabs stay formula-free):**
+**Sheets formulas (Metrics + manual Transactions tab; auto-written data tabs stay formula-free):**
 - Each Metrics column is one row-1 array formula (`={"header"; BYROW(...)}`); extends automatically
 - New Positions/Risk rows → Metrics aggregates update with no manual edits
 - Dashboard always reflects the latest snapshot
 - `nav_usd` = `SUMPRODUCT((Positions!A=ts) * value_signed_usd)` — venue-agnostic, absorbs new protocols
 - `net_carry_daily_usd` is non-zero (sum of signed `daily_carry_usd`)
 - `wsteth_eth_ratio` slowly increases over time (visible on weekly chart)
+- `net_capital_in_usd` is the running signed sum of `Transactions!J` (`in=+`/`out=−`); `pnl_usd` ≈ 0
+  right after you log a deposit at its then-price, then drifts with price/yield. NAV excludes idle
+  wallet balances — fold them in separately if you hold undeployed funds
