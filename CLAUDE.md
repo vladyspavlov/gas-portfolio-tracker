@@ -251,6 +251,28 @@ Main.js collects tags and **skips the whole snapshot** if any module errored (no
 
 Target execution time: < 15 seconds. GAS timeout is 6 minutes, but hourly trigger rejects runs > ~30s.
 
+### Snapshot cadence — prefer 6h over 1h as the data grows
+
+The time-driven trigger on `snapshotPortfolio` is set in the **GAS UI → Triggers** (not in code).
+**Every 6 hours is the recommended default**, not hourly. Each run appends 1 Snapshots row + N
+Positions rows + M Risk rows, and positions barely move hour-to-hour, so 6h (4 points/day) loses
+nothing useful for long-term NAV/P&L tracking while cutting growth 6× (hourly ≈ 8,760 snapshots/yr →
+6h ≈ 1,460/yr).
+
+Two pressures this relieves:
+- **10M-cell spreadsheet limit** — Positions (13 cols × N per snapshot) is the bulk; 6h stretches the
+  ceiling ~6×.
+- **Quadratic recalc (the real bottleneck)** — every Metrics row does a `SUMPRODUCT` over *all*
+  Positions rows, so recalc cost ≈ snapshots × positions. This makes the sheet sluggish long before
+  the cell limit; fewer snapshots help directly.
+
+**Cadence-independent by design:** all Metrics formulas key off the *timestamp* (`BYROW(Snapshots!A…)`
++ `SUMPRODUCT` matching `Positions!A=ts`), never a row-count window, and the staking yield uses the
+on-chain Lido rate (Snapshots G/H) rather than a 168-row/7-day window. So changing the cadence
+**breaks no formula** — do NOT introduce any "N rows = T hours" window, or this guarantee is lost.
+Changing the cadence only slows *future* growth; to shrink an already-large sheet, archive/downsample
+old Positions rows separately.
+
 ---
 
 ## `syncTransactions()` execution flow (DORMANT — kept for reference, no trigger)
