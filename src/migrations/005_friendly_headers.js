@@ -1,13 +1,13 @@
-// Migration 005 — friendly Ukrainian headers + a net-% (return) column on Metrics.
+// Migration 005 — friendly Ukrainian headers on all five tabs.
 //
 // One-time, run MANUALLY from the GAS editor (never by a trigger). See 001–004 for the convention.
 //
-// Two independent changes (run either/both; both are idempotent and re-runnable):
-//
 //   relabelFriendlyHeaders() — renames the row-1 HEADER LABELS on all five tabs to human-friendly
 //                              Ukrainian (the sheet is monitored by people, not just formulas).
-//   addNetPctColumn()        — appends Metrics Z = pnl_pct = pnl_usd(Y) / net_capital_in_usd(X):
-//                              overall return % per snapshot, for a dedicated "net %" chart.
+//                              Idempotent and re-runnable.
+//
+// (A net-% column on Metrics Z was added here originally, then reverted: it was identical to col U
+//  `net_carry_yield_pct` = M*365/L, so it was pure duplication. Chart col U instead.)
 //
 // WHY THIS IS SAFE (load-bearing): every Metrics/Dashboard formula keys off COLUMN LETTERS
 // (Snapshots!B, Positions!K, …) and off literal DATA VALUES (Positions!B="aave", G="supply",
@@ -66,14 +66,6 @@ const Migrate005 = {
     'P&L, USD'                   // Y  pnl_usd
   ],
 
-  // ── Net-% column (Metrics Z = 26): annualized net carry yield, matching the Dashboard's "net %"
-  // (=INDEX(Metrics!M:M,row)*365/INDEX(Metrics!L:L,row)) — i.e. net_carry_daily_usd(M)*365 / nav_usd(L).
-  // Per snapshot, blank on empty rows. NB: this is the same formula as col U (net_carry_yield_pct);
-  // Z just exposes it as a standalone "net %" series next to the P&L columns. Format as %.
-  NET_PCT_COL: 26,
-  NET_PCT_FORMULA:
-    '={"Чиста дохідність, %"; ARRAYFORMULA(IF(Snapshots!A2:A="","",IFERROR(M2:M*365/L2:L,"")))}',
-
   // Swap only the `{"old"; ...` label on a formula-bundled header cell; leave the body intact.
   relabelFormulaHeader: function(sheet, col, label) {
     const cell = sheet.getRange(1, col);
@@ -117,25 +109,8 @@ const Migrate005 = {
       Migrate005.relabelFormulaHeader(m, i + 1, label);
     });
     Logger.log('relabel: Metrics A–Y → UA headers (formula labels swapped in place)');
-  },
-
-  addNetPctColumn: function() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const m  = ss.getSheetByName('Metrics');
-    if (!m) throw new Error('Metrics tab not found — run 001 first');
-
-    // Guard: Z = M*365/L, so M (net_carry_daily_usd) and L (nav_usd) must exist (migration 001).
-    const lHeader = String(m.getRange(1, 12).getValue());   // L row-1 spilled label
-    if (lHeader.indexOf('nav') === -1 && lHeader.indexOf('NAV') === -1) {
-      throw new Error('Metrics!L is "' + lHeader + '", expected nav_usd/NAV — run 001 migrateMetricsFormulas() first');
-    }
-
-    m.getRange(1, Migrate005.NET_PCT_COL).setValue(Migrate005.NET_PCT_FORMULA);
-    Logger.log('addNetPctColumn: wrote net % at Metrics Z (col 26) = net_carry_daily(M)*365 / nav(L)');
   }
 };
 
-// Top-level wrappers — object methods don't appear in the GAS editor's Run dropdown.
-// Run order doesn't matter; both are idempotent.
+// Top-level wrapper — object methods don't appear in the GAS editor's Run dropdown.
 function relabelFriendlyHeaders() { Migrate005.relabelFriendlyHeaders(); }
-function addNetPctColumn()        { Migrate005.addNetPctColumn(); }
