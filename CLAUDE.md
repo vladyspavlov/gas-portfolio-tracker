@@ -50,7 +50,8 @@ gas-portfolio/
 │       ├── 002_transactions_pnl.js            ← Transactions tab + Metrics X/Y (net_capital_in, pnl)
 │       ├── 003_transactions_price_formulas.js ← (interim) per-row price formulas + cursor reset
 │       ├── 004_manual_ledger.js               ← Transactions → manual ledger (value/flow array-formulas)
-│       └── 005_friendly_headers.js            ← Ukrainian header labels (all tabs) + Metrics Z net-% column
+│       ├── 005_friendly_headers.js            ← Ukrainian header labels (all tabs)
+│       └── 006_observed_yield_column.js       ← Metrics Z: observed on-chain annual yield (chartable)
 ├── .clasp.json.example      ← template for local dev (committed)
 ├── .gitignore
 ├── CLAUDE.md
@@ -344,6 +345,17 @@ clears `TX_SCANNED_*` Script Properties. Not part of the manual-ledger setup.
   (A `addNetPctColumn()` adding **Metrics Z** = `net_carry_daily_usd(M)*365 / nav_usd(L)` was here
   originally, then reverted — it was identical to col U `net_carry_yield_pct`. Chart col U instead.)
 
+**`006_observed_yield_column.js`** (cosmetic addition — idempotent, run once):
+- `addObservedYieldColumn()` — appends **Metrics Z** = the Dashboard's "true annual yield" cell
+  re-expressed as a **per-row, chartable** series: `(net_carry_daily(M) + wstETH_value × observed
+  daily staking) × 365 / nav(L)`, where observed daily staking comes from the on-chain wstETH-rate
+  growth over a trailing **7-day** window, falling back to published `lido_apr(T)` when <7 days of rate
+  history (else `"warming up…"`). **Cadence-safe**: finds the 7-days-ago point by TIMESTAMP
+  (`MATCH(ts-7, Snapshots!A, 1)`) and divides by ACTUAL elapsed days — NOT by a row count (so it
+  obeys the cadence-independence rule the Dashboard cell's `MAX(p-168,2)`/`*(1/7)` violated). Distinct
+  from col W (`true_annual_yield_pct`, which always uses the *published* APR). Guarded on L/S (001).
+  Once installed, the Dashboard cell can be simplified to `=INDEX(Metrics!Z:Z, $C$2)`.
+
 **Manual-ledger setup (run once, in order):** `initTransactionsTab()` → `setupManualLedger()` →
 `migrateMetricsPnl()`. Then set `TX_SYNC_ENABLED=false` in Config and add **no** trigger on
 `syncTransactions`. Enter capital flows by hand (A timestamp · B chain · E token · F `in`/`out` ·
@@ -379,7 +391,21 @@ Y ={"pnl_usd"; ARRAYFORMULA(IF(Snapshots!A2:A="","", L2:L - X2:X))}   // nav_usd
 
 Annualized net carry yield per snapshot (`net_carry_daily_usd(M)*365 / nav_usd(L)`, matching the
 Dashboard's `=INDEX(Metrics!M:M,row)*365/INDEX(Metrics!L:L,row)`) lives in col **U**
-(`net_carry_yield_pct`) — chart that. (A duplicate Metrics Z `net_pct` from migration 005 was reverted.)
+(`net_carry_yield_pct`) — chart that. (A duplicate Metrics Z `net_pct` from migration 005 was reverted;
+Z is now the observed annual-yield column from migration 006, below.)
+
+Observed annual yield (Metrics Z, from migration 006) — the Dashboard's "true annual yield" cell as a
+per-row series. Cadence-safe: looks back by TIMESTAMP (`MATCH(ts-7, …, 1)`) and divides by ACTUAL
+elapsed days, never a row count:
+```
+Z ={"…(факт.), %"; MAP(Metrics!A2:A,R2:R,C2:C,M2:M,L2:L,S2:S,T2:T, LAMBDA(ts,r,c,m,l,s,t,
+     IF(ts="","", LET(v, r*c,
+       pos,   IFERROR(MATCH(ts-7, Snapshots!$A$2:$A, 1), 0),
+       spast, IF(pos=0,0,INDEX(Snapshots!$G$2:$G,pos)),
+       tpast, IF(pos=0,ts,INDEX(Snapshots!$A$2:$A,pos)),
+       IF(N(spast)>0, (m + v*(s/spast-1)/(ts-tpast))*365/l,                  // observed on-chain rate
+          IF(ISNUMBER(t), (m + v*t/365)*365/l, "warming up…")))))) }         // lido_apr fallback
+```
 
 > **Header labels are Ukrainian** (migration 005 + `initHeaders()`) — purely cosmetic. Formulas key
 > off column letters and English DATA values (`"aave"`, `"supply"`, `"in"`), never header text, so
@@ -535,5 +561,8 @@ Claude Code will load both files and resume without needing the full conversatio
   wallet balances — fold them in separately if you hold undeployed funds
 - net % (annualized net carry yield = `net_carry_daily_usd*365 / nav_usd`, matching the Dashboard's
   net %) is col **U** (`net_carry_yield_pct`); blank on empty rows; chartable as its own series
+- observed annual yield (Metrics Z, migration 006) = the Dashboard's "true annual yield" as a per-row
+  series — observed on-chain wstETH-rate growth over a trailing 7d window (by timestamp, cadence-safe),
+  lido_apr fallback, `"warming up…"` before 7d of history; chartable; distinct from col W (published APR)
 - Header labels on all five tabs are friendly Ukrainian; DATA values stay English (formulas filter on
   them) — run migration 005 `relabelFriendlyHeaders()` to apply to a live sheet
