@@ -49,7 +49,8 @@ gas-portfolio/
 │       ├── 001_tall_schema.js                 ← positions→13-col tall + Metrics A–W formulas
 │       ├── 002_transactions_pnl.js            ← Transactions tab + Metrics X/Y (net_capital_in, pnl)
 │       ├── 003_transactions_price_formulas.js ← (interim) per-row price formulas + cursor reset
-│       └── 004_manual_ledger.js               ← Transactions → manual ledger (value/flow array-formulas)
+│       ├── 004_manual_ledger.js               ← Transactions → manual ledger (value/flow array-formulas)
+│       └── 005_friendly_headers.js            ← Ukrainian header labels (all tabs) + Metrics Z net-% column
 ├── .clasp.json.example      ← template for local dev (committed)
 ├── .gitignore
 ├── CLAUDE.md
@@ -331,6 +332,19 @@ clears `TX_SCANNED_*` Script Properties. Not part of the manual-ledger setup.
 - `setupManualLedger()` — **clears existing Transactions data rows** and installs the auto-extending
   `value_usd` (I) and `capital_flow_signed_usd` (J, `in=+`/`out=−`) **column array-formulas**.
 
+**`005_friendly_headers.js`** (cosmetic labels + one new chart series — run either function, any order,
+both idempotent):
+- `relabelFriendlyHeaders()` — renames row-1 header **labels** on all five tabs to human-friendly
+  Ukrainian (the sheet is monitored by people). Plain-cell headers (Snapshots/Positions/Risk +
+  Transactions A–H,K) are overwritten; formula-bundled headers (every Metrics col + Transactions I/J)
+  are relabelled **in place** (swap only the `{"label";` segment, body untouched). **Safe because no
+  formula references header text** — they key off column letters + English DATA values
+  (`Positions!B="aave"`, `G="supply"`, `Transactions!F="in"`). Those row values therefore **stay
+  English**; only labels translate. `initHeaders()` (Main.js) writes the same UA labels for fresh setups.
+- `addNetPctColumn()` — appends **Metrics Z** = `pnl_pct` = `pnl_usd(Y) / net_capital_in_usd(X)` =
+  overall return % per snapshot (blank on empty/zero-capital rows). Lets you chart "net %" as its own
+  series. Requires X/Y from `migrateMetricsPnl()` (002) — guarded.
+
 **Manual-ledger setup (run once, in order):** `initTransactionsTab()` → `setupManualLedger()` →
 `migrateMetricsPnl()`. Then set `TX_SYNC_ENABLED=false` in Config and add **no** trigger on
 `syncTransactions`. Enter capital flows by hand (A timestamp · B chain · E token · F `in`/`out` ·
@@ -362,7 +376,15 @@ that. NAV is DeFi positions only, so idle (undeployed) wallet balances are NOT i
 X ={"net_capital_in_usd"; BYROW(Snapshots!A2:A, LAMBDA(ts, IF(ts="","",
      SUMPRODUCT((Transactions!A$2:A<>"") * (Transactions!A$2:A<=ts) * IFERROR(Transactions!J$2:J,0)))))}
 Y ={"pnl_usd"; ARRAYFORMULA(IF(Snapshots!A2:A="","", L2:L - X2:X))}   // nav_usd(L) − net_capital_in(X)
+Z ={"pnl_pct";  ARRAYFORMULA(IF(Snapshots!A2:A="","", IFERROR(Y2:Y/X2:X,"")))}  // net % (migration 005)
 ```
+
+`pnl_pct` (Z) is the overall **return %** per snapshot — `pnl_usd / net_capital_in_usd` — for a
+dedicated "net %" chart (decimal, format as %). Added by `005_friendly_headers.js > addNetPctColumn()`.
+
+> **Header labels are Ukrainian** (migration 005 + `initHeaders()`) — purely cosmetic. Formulas key
+> off column letters and English DATA values (`"aave"`, `"supply"`, `"in"`), never header text, so
+> labels translate freely; the row values the script writes stay English.
 
 **Dashboard tab pattern (always last row):**
 ```
@@ -512,3 +534,7 @@ Claude Code will load both files and resume without needing the full conversatio
 - `net_capital_in_usd` is the running signed sum of `Transactions!J` (`in=+`/`out=−`); `pnl_usd` ≈ 0
   right after you log a deposit at its then-price, then drifts with price/yield. NAV excludes idle
   wallet balances — fold them in separately if you hold undeployed funds
+- `pnl_pct` (Metrics Z) = `pnl_usd / net_capital_in_usd` — overall return % per snapshot, blank on
+  empty/zero-capital rows; chartable as its own "net %" series
+- Header labels on all five tabs are friendly Ukrainian; DATA values stay English (formulas filter on
+  them) — run migration 005 `relabelFriendlyHeaders()` to apply to a live sheet

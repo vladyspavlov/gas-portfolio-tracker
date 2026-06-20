@@ -161,24 +161,32 @@ function debugState() {
 function initHeaders() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
+  // Friendly Ukrainian header LABELS (the sheet is human-monitored). These are cosmetic only:
+  // every Metrics/Dashboard formula keys off column letters + English DATA values (e.g.
+  // Positions!B="aave", G="supply", Transactions!F="in"), never the header text — so the labels
+  // are free to translate, but the row VALUES the script writes must stay English. Keep this in
+  // sync with migration 005 (relabelFriendlyHeaders), which applies the same labels to a live sheet.
   var tabs = [
     {
       name: 'Snapshots',
-      headers: ['timestamp', 'eth_usd', 'btc_usd', 'wsteth_usd', 'cbbtc_usd', 'error_flags', 'wsteth_steth_rate', 'lido_apr']
+      headers: ['Час', 'ETH, USD', 'BTC, USD', 'wstETH, USD', 'cbBTC, USD',
+                'Помилки', 'Курс wstETH→stETH', 'APR Lido (7д)']
     },
     {
       name: 'Positions',
-      headers: ['timestamp', 'protocol', 'chain', 'category', 'position_id', 'token', 'side', 'amount', 'price_usd', 'value_usd', 'value_signed_usd', 'apy', 'daily_carry_usd']
+      headers: ['Час', 'Протокол', 'Мережа', 'Категорія', 'ID позиції', 'Токен', 'Сторона',
+                'Кількість', 'Ціна, USD', 'Вартість, USD', 'Вартість зі знаком, USD',
+                'APY', 'Денний дохід, USD']
     },
     {
       name: 'Risk',
-      headers: ['timestamp', 'protocol', 'chain', 'position_id', 'health_factor', 'ltv']
+      headers: ['Час', 'Протокол', 'Мережа', 'ID позиції', 'Health Factor', 'LTV']
     },
     {
       name: 'Transactions',
-      headers: ['timestamp', 'chain', 'protocol', 'counterparty', 'token', 'direction',
-                'amount', 'price_usd_at_tx', 'value_usd', 'capital_flow_signed_usd',
-                'tx_hash']
+      headers: ['Час', 'Мережа', 'Протокол', 'Контрагент', 'Токен', 'Напрям (in/out)',
+                'Кількість', 'Ціна на дату, USD', 'Вартість, USD', 'Рух капіталу зі знаком, USD',
+                'Хеш транзакції']
     }
   ];
 
