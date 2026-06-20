@@ -66,10 +66,13 @@ const Migrate005 = {
     'P&L, USD'                   // Y  pnl_usd
   ],
 
-  // ── Net-% column (Metrics Z = 26): return on invested capital, blank on empty/zero-capital rows ─
+  // ── Net-% column (Metrics Z = 26): annualized net carry yield, matching the Dashboard's "net %"
+  // (=INDEX(Metrics!M:M,row)*365/INDEX(Metrics!L:L,row)) — i.e. net_carry_daily_usd(M)*365 / nav_usd(L).
+  // Per snapshot, blank on empty rows. NB: this is the same formula as col U (net_carry_yield_pct);
+  // Z just exposes it as a standalone "net %" series next to the P&L columns. Format as %.
   NET_PCT_COL: 26,
   NET_PCT_FORMULA:
-    '={"Чистий результат, %"; ARRAYFORMULA(IF(Snapshots!A2:A="","",IFERROR(Y2:Y/X2:X,"")))}',
+    '={"Чиста дохідність, %"; ARRAYFORMULA(IF(Snapshots!A2:A="","",IFERROR(M2:M*365/L2:L,"")))}',
 
   // Swap only the `{"old"; ...` label on a formula-bundled header cell; leave the body intact.
   relabelFormulaHeader: function(sheet, col, label) {
@@ -121,14 +124,14 @@ const Migrate005 = {
     const m  = ss.getSheetByName('Metrics');
     if (!m) throw new Error('Metrics tab not found — run 001 first');
 
-    // Guard: Z = Y/X, so X (net_capital_in) and Y (pnl) must already exist (migration 002).
-    const yHeader = String(m.getRange(1, 25).getValue());   // Y row-1 spilled label
-    if (yHeader.indexOf('pnl') === -1 && yHeader.indexOf('P&L') === -1) {
-      throw new Error('Metrics!Y is "' + yHeader + '", expected pnl_usd/P&L — run 002 migrateMetricsPnl() first');
+    // Guard: Z = M*365/L, so M (net_carry_daily_usd) and L (nav_usd) must exist (migration 001).
+    const lHeader = String(m.getRange(1, 12).getValue());   // L row-1 spilled label
+    if (lHeader.indexOf('nav') === -1 && lHeader.indexOf('NAV') === -1) {
+      throw new Error('Metrics!L is "' + lHeader + '", expected nav_usd/NAV — run 001 migrateMetricsFormulas() first');
     }
 
     m.getRange(1, Migrate005.NET_PCT_COL).setValue(Migrate005.NET_PCT_FORMULA);
-    Logger.log('addNetPctColumn: wrote pnl_pct (net %) at Metrics Z (col 26) = Y/X');
+    Logger.log('addNetPctColumn: wrote net % at Metrics Z (col 26) = net_carry_daily(M)*365 / nav(L)');
   }
 };
 
