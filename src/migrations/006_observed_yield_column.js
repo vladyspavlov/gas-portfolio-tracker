@@ -31,7 +31,7 @@ const Migrate006 = {
   //   branch 2 (lido_apr): (net_carry_daily + v × apr/365) × 365 / NAV   ← cadence-free fallback
   //   else "warming up…"
   OBS_YIELD_FORMULA:
-    '={"Річна дохідність (факт.), %"; MAP(Metrics!A2:A,Metrics!R2:R,Metrics!C2:C,Metrics!M2:M,Metrics!L2:L,Metrics!S2:S,Metrics!T2:T,LAMBDA(ts,r,c,m,l,s,t,IF(ts="","",LET(v,r*c,pos,IFERROR(MATCH(ts-7,Snapshots!$A$2:$A,1),0),spast,IF(pos=0,0,INDEX(Snapshots!$G$2:$G,pos)),tpast,IF(pos=0,ts,INDEX(Snapshots!$A$2:$A,pos)),IF(N(spast)>0,(m+v*(s/spast-1)/(ts-tpast))*365/l,IF(ISNUMBER(t),(m+v*t/365)*365/l,"warming up…")))))))}',
+    '={"Річна дохідність (факт.), %"; MAP(Metrics!A2:A,Metrics!R2:R,Metrics!C2:C,Metrics!M2:M,Metrics!L2:L,Metrics!S2:S,Metrics!T2:T,LAMBDA(ts,r,c,m,l,s,t,IF(ts="","",LET(v,r*c,pos,IFERROR(MATCH(ts-7,Snapshots!$A$2:$A,1),0),spast,IF(pos=0,0,INDEX(Snapshots!$G$2:$G,pos)),tpast,IF(pos=0,ts,INDEX(Snapshots!$A$2:$A,pos)),IF(N(spast)>0,(m+v*(s/spast-1)/(ts-tpast))*365/l,IF(ISNUMBER(t),(m+v*t/365)*365/l,"warming up…"))))))}',
 
   addObservedYieldColumn: function() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
